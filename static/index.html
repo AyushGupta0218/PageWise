@@ -1,15 +1,408 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pagewise — PDF Q&amp;A</title>
-<style>
-:root{font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#18212f;background:#f4f6fa}*{box-sizing:border-box}body{margin:0}.shell{max-width:1000px;margin:36px auto;padding:0 20px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.brand{font-size:25px;font-weight:750}.brand span{color:#5867d8}.layout{display:grid;grid-template-columns:290px 1fr;gap:18px}.card{background:white;border:1px solid #e3e7ef;border-radius:14px;padding:20px;box-shadow:0 6px 24px #1a2a4410}.card h2{font-size:15px;margin:0 0 15px}.upload{border:1.5px dashed #bdc7d9;padding:18px;border-radius:10px;text-align:center;font-size:13px;color:#667085}.upload input{width:100%;margin-top:12px}.hint{font-size:12px;color:#7b8495;line-height:1.5}.doc{padding:11px 0;border-bottom:1px solid #edf0f4;font-size:13px}.doc label{display:flex;gap:8px;align-items:flex-start;overflow-wrap:anywhere}.doc small{display:block;color:#828b9b;margin:4px 0 0 24px}.chat{display:flex;flex-direction:column;min-height:600px}.messages{flex:1;overflow:auto;max-height:70vh}.bubble{margin:0 0 16px;padding:13px 15px;border-radius:12px;line-height:1.55;font-size:14px;white-space:pre-wrap}.user{background:#eef0ff;margin-left:14%}.assistant{background:#f4f6f9;margin-right:8%}.sources{font-size:12px;color:#5a6578;margin-top:10px;padding-top:9px;border-top:1px solid #dce1ea}.composer{display:flex;gap:10px;margin-top:14px}.composer textarea{flex:1;border:1px solid #d5dbe6;border-radius:10px;padding:12px;font:inherit;resize:vertical;min-height:48px}button{border:0;border-radius:9px;background:#5867d8;color:white;padding:11px 16px;font-weight:650;cursor:pointer}button:disabled{opacity:.55;cursor:wait}.status{font-size:12px;color:#737d8d;margin-top:9px}.empty{color:#798394;font-size:14px;text-align:center;padding:100px 20px}.warning{color:#a15b00}.new{background:#edf0ff;color:#4353c2;padding:8px 12px}@media(max-width:700px){.layout{grid-template-columns:1fr}.chat{min-height:440px}.messages{max-height:50vh}}
-</style></head><body><main class="shell"><header class="top"><div class="brand"><span>Page</span>wise</div><button class="new" id="newChat">New chat</button></header><div class="layout"><aside class="card"><h2>Your PDFs</h2><div class="upload">Upload a text-based PDF<input id="file" type="file" accept="application/pdf"></div><p class="hint">Upload PDFs to build a searchable library of document passages.</p><div id="docs"></div></aside><section class="card chat"><div class="messages" id="messages"><div class="empty">Upload a PDF, select it, and ask a question.</div></div><form class="composer" id="form"><textarea id="question" placeholder="Ask something about your documents…" required></textarea><button id="send">Ask</button></form><div class="status" id="status">Select one or more PDFs to search.</div></section></div></main>
-<script>
-let conversationId=null, documents=[];const $=id=>document.getElementById(id);
-function esc(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function refresh(){const r=await fetch('/api/documents');documents=await r.json();$('docs').innerHTML=documents.length?documents.map(d=>`<div class="doc"><label><input type="checkbox" value="${d.id}" checked><span>${esc(d.filename)}</span></label><small>${d.chunks} passages</small></div>`).join(''):'<p class="hint">No PDFs yet.</p>';}
-function addBubble(role,text,sources=[]){const box=$('messages');box.querySelector('.empty')?.remove();let div=document.createElement('div');div.className='bubble '+role;div.textContent=text;if(sources.length){const src=document.createElement('div');src.className='sources';src.innerHTML='<b>Retrieved sources</b><br>'+sources.map(s=>`${esc(s.filename)} · page ${s.page} · ${esc(s.excerpt)}`).join('<br><br>');div.appendChild(src)}box.appendChild(div);box.scrollTop=box.scrollHeight;}
-$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;$('status').textContent='Uploading and indexing…';try{const data=new FormData();data.append('file',f);const r=await fetch('/api/documents',{method:'POST',body:data});const j=await r.json();if(!r.ok)throw Error(j.detail||'Upload failed');$('status').textContent=`Indexed ${j.chunks} passages from ${j.filename}.`;await refresh()}catch(err){$('status').textContent=err.message;$('status').className='status warning'}finally{e.target.value=''}};
-$('newChat').onclick=()=>{conversationId=null;$('messages').innerHTML='<div class="empty">Ask a question about your selected PDFs.</div>';};
-$('form').onsubmit=async e=>{e.preventDefault();const question=$('question').value.trim();if(!question)return;const selected=[...document.querySelectorAll('#docs input:checked')].map(x=>x.value);if(!selected.length){$('status').textContent='Select at least one PDF.';return}addBubble('user',question);$('question').value='';$('send').disabled=true;$('status').textContent='Searching documents and writing an answer…';try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,conversation_id:conversationId,document_ids:selected})});const j=await r.json();if(!r.ok)throw Error(j.detail||'Question failed');conversationId=j.conversation_id;addBubble('assistant',j.answer,j.sources);$('status').textContent=j.usage?`Tokens used this answer: ${j.usage.prompt_tokens} prompt, ${j.usage.completion_tokens} response.`:'Done.'}catch(err){$('status').textContent=err.message;$('status').className='status warning'}finally{$('send').disabled=false}};
-refresh().catch(()=>{$('status').textContent='Could not connect to the server.'});
-</script></body></html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pagewise — PDF Q&amp;A</title>
+    <style>
+      :root {
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        color: #18212f;
+        background: #f4f6fa;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      .shell {
+        max-width: 1000px;
+        margin: 36px auto;
+        padding: 0 20px;
+      }
+
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 22px;
+      }
+
+      .brand {
+        font-size: 25px;
+        font-weight: 750;
+      }
+
+      .brand span {
+        color: #5867d8;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 290px 1fr;
+        gap: 18px;
+      }
+
+      .card {
+        padding: 20px;
+        border: 1px solid #e3e7ef;
+        border-radius: 14px;
+        background: white;
+        box-shadow: 0 6px 24px #1a2a4410;
+      }
+
+      .card h2 {
+        margin: 0 0 15px;
+        font-size: 15px;
+      }
+
+      .upload {
+        padding: 18px;
+        border: 1.5px dashed #bdc7d9;
+        border-radius: 10px;
+        color: #667085;
+        font-size: 13px;
+        text-align: center;
+      }
+
+      .upload input {
+        width: 100%;
+        margin-top: 12px;
+      }
+
+      .hint {
+        color: #7b8495;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .doc {
+        padding: 11px 0;
+        border-bottom: 1px solid #edf0f4;
+        font-size: 13px;
+      }
+
+      .doc label {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        overflow-wrap: anywhere;
+      }
+
+      .doc small {
+        display: block;
+        margin: 4px 0 0 24px;
+        color: #828b9b;
+      }
+
+      .chat {
+        display: flex;
+        flex-direction: column;
+        min-height: 600px;
+      }
+
+      .messages {
+        flex: 1;
+        max-height: 70vh;
+        overflow: auto;
+      }
+
+      .bubble {
+        margin: 0 0 16px;
+        padding: 13px 15px;
+        border-radius: 12px;
+        font-size: 14px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      .user {
+        margin-left: 14%;
+        background: #eef0ff;
+      }
+
+      .assistant {
+        margin-right: 8%;
+        background: #f4f6f9;
+      }
+
+      .sources {
+        margin-top: 10px;
+        padding-top: 9px;
+        border-top: 1px solid #dce1ea;
+        color: #5a6578;
+        font-size: 12px;
+      }
+
+      .composer {
+        display: flex;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .composer textarea {
+        flex: 1;
+        min-height: 48px;
+        padding: 12px;
+        border: 1px solid #d5dbe6;
+        border-radius: 10px;
+        font: inherit;
+        resize: vertical;
+      }
+
+      button {
+        padding: 11px 16px;
+        border: 0;
+        border-radius: 9px;
+        background: #5867d8;
+        color: white;
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+
+      .status {
+        margin-top: 9px;
+        color: #737d8d;
+        font-size: 12px;
+      }
+
+      .empty {
+        padding: 100px 20px;
+        color: #798394;
+        font-size: 14px;
+        text-align: center;
+      }
+
+      .warning {
+        color: #a15b00;
+      }
+
+      .new {
+        padding: 8px 12px;
+        background: #edf0ff;
+        color: #4353c2;
+      }
+
+      @media (max-width: 700px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .chat {
+          min-height: 440px;
+        }
+
+        .messages {
+          max-height: 50vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="top">
+        <div class="brand"><span>Page</span>wise</div>
+        <button class="new" id="newChat">New chat</button>
+      </header>
+
+      <div class="layout">
+        <aside class="card">
+          <h2>Your PDFs</h2>
+          <div class="upload">
+            Upload a text-based PDF
+            <input id="file" type="file" accept="application/pdf" />
+          </div>
+          <p class="hint">
+            Upload PDFs to build a searchable library of document passages.
+          </p>
+          <div id="docs"></div>
+        </aside>
+
+        <section class="card chat">
+          <div class="messages" id="messages">
+            <div class="empty">Upload a PDF, select it, and ask a question.</div>
+          </div>
+          <form class="composer" id="form">
+            <textarea
+              id="question"
+              placeholder="Ask something about your documents…"
+              required
+            ></textarea>
+            <button id="send">Ask</button>
+          </form>
+          <div class="status" id="status">
+            Select one or more PDFs to search.
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      let conversationId = null;
+      let documents = [];
+
+      const $ = (id) => document.getElementById(id);
+
+      function escapeHtml(value) {
+        return value.replace(/[&<>"']/g, (character) => {
+          const entities = {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          };
+          return entities[character];
+        });
+      }
+
+      async function refreshDocuments() {
+        const response = await fetch("/api/documents");
+        documents = await response.json();
+
+        $("docs").innerHTML = documents.length
+          ? documents
+              .map(
+                (document) => `
+                  <div class="doc">
+                    <label>
+                      <input type="checkbox" value="${document.id}" checked />
+                      <span>${escapeHtml(document.filename)}</span>
+                    </label>
+                    <small>${document.chunks} passages</small>
+                  </div>
+                `,
+              )
+              .join("")
+          : '<p class="hint">No PDFs yet.</p>';
+      }
+
+      function addBubble(role, text, sources = []) {
+        const messageList = $("messages");
+        messageList.querySelector(".empty")?.remove();
+
+        const bubble = document.createElement("div");
+        bubble.className = `bubble ${role}`;
+        bubble.textContent = text;
+
+        if (sources.length) {
+          const sourceList = document.createElement("div");
+          sourceList.className = "sources";
+          sourceList.innerHTML =
+            "<b>Retrieved sources</b><br>" +
+            sources
+              .map(
+                (source) =>
+                  `${escapeHtml(source.filename)} · page ${source.page} · ${escapeHtml(source.excerpt)}`,
+              )
+              .join("<br><br>");
+          bubble.appendChild(sourceList);
+        }
+
+        messageList.appendChild(bubble);
+        messageList.scrollTop = messageList.scrollHeight;
+      }
+
+      $("file").onchange = async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        $("status").textContent = "Uploading and indexing…";
+
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+
+          const response = await fetch("/api/documents", {
+            method: "POST",
+            body: formData,
+          });
+          const result = await response.json();
+
+          if (!response.ok) {
+            throw new Error(result.detail || "Upload failed");
+          }
+
+          $("status").textContent =
+            `Indexed ${result.chunks} passages from ${result.filename}.`;
+          await refreshDocuments();
+        } catch (error) {
+          $("status").textContent = error.message;
+          $("status").className = "status warning";
+        } finally {
+          event.target.value = "";
+        }
+      };
+
+      $("newChat").onclick = () => {
+        conversationId = null;
+        $("messages").innerHTML =
+          '<div class="empty">Ask a question about your selected PDFs.</div>';
+      };
+
+      $("form").onsubmit = async (event) => {
+        event.preventDefault();
+
+        const question = $("question").value.trim();
+        if (!question) return;
+
+        const selectedDocumentIds = [
+          ...document.querySelectorAll("#docs input:checked"),
+        ].map((checkbox) => checkbox.value);
+
+        if (!selectedDocumentIds.length) {
+          $("status").textContent = "Select at least one PDF.";
+          return;
+        }
+
+        addBubble("user", question);
+        $("question").value = "";
+        $("send").disabled = true;
+        $("status").textContent = "Searching documents and writing an answer…";
+
+        try {
+          const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              question,
+              conversation_id: conversationId,
+              document_ids: selectedDocumentIds,
+            }),
+          });
+          const result = await response.json();
+
+          if (!response.ok) {
+            throw new Error(result.detail || "Question failed");
+          }
+
+          conversationId = result.conversation_id;
+          addBubble("assistant", result.answer, result.sources);
+
+          $("status").textContent = result.usage
+            ? `Tokens used this answer: ${result.usage.prompt_tokens} prompt, ${result.usage.completion_tokens} response.`
+            : "Done.";
+        } catch (error) {
+          $("status").textContent = error.message;
+          $("status").className = "status warning";
+        } finally {
+          $("send").disabled = false;
+        }
+      };
+
+      refreshDocuments().catch(() => {
+        $("status").textContent = "Could not connect to the server.";
+      });
+    </script>
+  </body>
+</html>
+
